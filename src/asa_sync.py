@@ -104,7 +104,7 @@ def make_client_secret() -> str:
         "iss": TEAM_ID,
         "aud": "https://appleid.apple.com",
         "iat": now,
-        "exp": now + 60 * 60 * 24 * 180,  # up to 180 days; we mint fresh anyway
+        "exp": now + 3600,  # 1h — minted fresh every run; stays far from Apple's 180d cap
     }
     try:
         return jwt.encode(payload, _normalize_pem(PRIVATE_KEY),
@@ -221,7 +221,7 @@ def fetch_campaign_report(session, token, org_id, start, end):
             "endTime": end,
             "granularity": "DAILY",
             "selector": {
-                "orderBy": [{"field": "localSpend", "sortOrder": "DESCENDING"}],
+                "orderBy": [{"field": "countryOrRegion", "sortOrder": "ASCENDING"}],
                 "pagination": {"offset": offset, "limit": limit},
             },
             "groupBy": ["countryOrRegion"],
@@ -263,18 +263,24 @@ def normalize(report_rows, org_id, org_name, pulled_at):
                 "campaign_id": str(campaign_id) if campaign_id is not None else None,
                 "campaign_name": meta.get("campaignName"),
                 "adam_id": str(adam_id) if adam_id is not None else None,
-                "app_name": app.get("appName"),
+                "app_name": app.get("appName") or meta.get("appName"),
                 "country_or_region": country,
                 "campaign_status": meta.get("campaignStatus") or meta.get("status"),
                 "storefront": meta.get("countryOrRegion"),
                 "impressions": int(_num(g.get("impressions")) or 0),
                 "taps": int(_num(g.get("taps")) or 0),
-                "installs": int(_num(g.get("installs") or g.get("totalInstalls")) or 0),
-                "new_downloads": int(_num(g.get("newDownloads")) or 0),
-                "redownloads": int(_num(g.get("redownloads")) or 0),
+                "installs": int(_num(g.get("installs")
+                                     or g.get("totalInstalls")
+                                     or g.get("tapInstalls")) or 0),
+                "new_downloads": int(_num(g.get("newDownloads")
+                                          or g.get("totalNewDownloads")) or 0),
+                "redownloads": int(_num(g.get("redownloads")
+                                        or g.get("totalRedownloads")) or 0),
                 "ttr": _num(g.get("ttr")),
-                "conversion_rate": _num(g.get("conversionRate")),
-                "avg_cpa_native": _num((g.get("avgCPA") or {}).get("amount")),
+                "conversion_rate": _num(g.get("conversionRate")
+                                        or g.get("tapInstallRate")),
+                "avg_cpa_native": _num(((g.get("avgCPA") or g.get("totalAvgCPA")
+                                         or g.get("tapInstallCPI") or {}) ).get("amount")),
                 "avg_cpt_native": _num((g.get("avgCPT") or {}).get("amount")),
                 "avg_cpm_native": _num((g.get("avgCPM") or {}).get("amount")),
                 "spend_native": _num(spend.get("amount")),
@@ -360,7 +366,7 @@ def main():
     pulled_at = dt.datetime.now(dt.timezone.utc).isoformat()
     today = dt.datetime.now(dt.timezone.utc).date()
     if FULL_BACKFILL:
-        start_d = dt.date.fromisoformat(BACKFILL_START)
+        start_d = dt.date.fromisoformat(BACKFILL_START or "2026-01-01")
     else:
         start_d = today - dt.timedelta(days=LOOKBACK_DAYS - 1)
     end_d = today
